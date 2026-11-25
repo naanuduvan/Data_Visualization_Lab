@@ -1,0 +1,127 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+
+# 1. Create a synthetic high-dimensional housing dataset
+np.random.seed(42)
+n_samples = 200
+
+data = {
+    # Continuous
+    'Price': np.random.normal(500000, 150000, n_samples),
+    'Area_SqFt': np.random.normal(2000, 500, n_samples),
+    # Discrete
+    'Bedrooms': np.random.choice([1, 2, 3, 4, 5], size=n_samples, p=[0.1, 0.2, 0.4, 0.2, 0.1]),
+    'Bathrooms': np.random.choice([1, 2, 3], size=n_samples, p=[0.3, 0.5, 0.2]),
+    # Ordinal
+    'Condition': np.random.choice(['Poor', 'Fair', 'Good', 'Excellent'], size=n_samples, p=[0.1, 0.3, 0.4, 0.2]),
+    # Nominal
+    'Neighborhood': np.random.choice(['Suburbs', 'Downtown', 'Rural'], size=n_samples)
+}
+
+housing_df = pd.DataFrame(data)
+
+# Introduce some missing values, duplicates, and outliers intentionally
+housing_df.loc[10:15, 'Area_SqFt'] = np.nan
+housing_df.loc[30:32, 'Price'] = np.nan
+housing_df = pd.concat([housing_df, housing_df.iloc[[5, 12, 50]]], ignore_index=True) # Duplicates
+housing_df.loc[100, 'Price'] = 2500000  # High Price Outlier
+housing_df.loc[101, 'Area_SqFt'] = 9000  # High Area Outlier
+
+print("Original Dataset Shape:", housing_df.shape)
+
+# 2. Preprocessing
+# A. Handle Duplicates
+housing_df = housing_df.drop_duplicates()
+
+# B. Handle Missing Values
+housing_df['Area_SqFt'] = housing_df['Area_SqFt'].fillna(housing_df['Area_SqFt'].median())
+housing_df['Price'] = housing_df['Price'].fillna(housing_df['Price'].median())
+
+# C. Handle Outliers using IQR method on continuous features
+for col in ['Price', 'Area_SqFt']:
+    Q1 = housing_df[col].quantile(0.25)
+    Q3 = housing_df[col].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    # Clip outliers to bounds rather than dropping them to preserve sample size
+    housing_df[col] = np.clip(housing_df[col], lower_bound, upper_bound)
+
+# D. Encode categorical variables for scale comparisons
+condition_map = {'Poor': 1, 'Fair': 2, 'Good': 3, 'Excellent': 4}
+housing_df['Condition_Encoded'] = housing_df['Condition'].map(condition_map)
+
+# 3. Normalization and Standardization
+scaler_minmax = MinMaxScaler()
+scaler_zscore = StandardScaler()
+
+# Keep original features copy for comparisons
+original_features = housing_df[['Price', 'Area_SqFt']].copy()
+
+minmax_features = pd.DataFrame(
+    scaler_minmax.fit_transform(original_features),
+    columns=[f'{col}_MinMax' for col in original_features.columns],
+    index=housing_df.index
+)
+
+zscore_features = pd.DataFrame(
+    scaler_zscore.fit_transform(original_features),
+    columns=[f'{col}_Zscore' for col in original_features.columns],
+    index=housing_df.index
+)
+
+# Combine back to dataframe
+housing_processed = pd.concat([housing_df, minmax_features, zscore_features], axis=1)
+
+# 4. Data Visualization
+fig, axes = plt.subplots(4, 3, figsize=(18, 20))
+fig.suptitle('Housing Data Processing & Scaling Diagnostics', fontsize=18, fontweight='bold')
+
+# Row 1: Bar Plots (Nominal & Ordinal) and Box Plot (Before scaling Outlier Handling check)
+sns.countplot(data=housing_df, x='Neighborhood', ax=axes[0, 0], palette='pastel')
+axes[0, 0].set_title('Distribution of Neighborhood (Nominal)')
+
+sns.countplot(data=housing_df, x='Condition', order=['Poor', 'Fair', 'Good', 'Excellent'], ax=axes[0, 1], palette='crest')
+axes[0, 1].set_title('Distribution of Condition (Ordinal)')
+
+sns.boxplot(data=original_features, ax=axes[0, 2], palette='Set2')
+axes[0, 2].set_title('Box Plots of Original Continuous Features')
+
+# Row 2: Original Distributions (Before Scaling)
+sns.histplot(housing_processed['Price'], kde=True, ax=axes[1, 0], color='blue')
+axes[1, 0].set_title('Original Price Distribution')
+
+sns.histplot(housing_processed['Area_SqFt'], kde=True, ax=axes[1, 1], color='blue')
+axes[1, 1].set_title('Original Area SqFt Distribution')
+
+sns.scatterplot(data=housing_processed, x='Area_SqFt', y='Price', ax=axes[1, 2], color='blue')
+axes[1, 2].set_title('Original Price vs Area')
+
+# Row 3: Min-Max Normalization
+sns.histplot(housing_processed['Price_MinMax'], kde=True, ax=axes[2, 0], color='green')
+axes[2, 0].set_title('Min-Max Scaled Price Distribution')
+
+sns.histplot(housing_processed['Area_SqFt_MinMax'], kde=True, ax=axes[2, 1], color='green')
+axes[2, 1].set_title('Min-Max Scaled Area SqFt Distribution')
+
+sns.scatterplot(data=housing_processed, x='Area_SqFt_MinMax', y='Price_MinMax', ax=axes[2, 2], color='green')
+axes[2, 2].set_title('Min-Max Scaled Price vs Area')
+
+# Row 4: Z-score Standardization
+sns.histplot(housing_processed['Price_Zscore'], kde=True, ax=axes[3, 0], color='orange')
+axes[3, 0].set_title('Z-score Scaled Price Distribution')
+
+sns.histplot(housing_processed['Area_SqFt_Zscore'], kde=True, ax=axes[3, 1], color='orange')
+axes[3, 1].set_title('Z-score Scaled Area SqFt Distribution')
+
+sns.scatterplot(data=housing_processed, x='Area_SqFt_Zscore', y='Price_Zscore', ax=axes[3, 2], color='orange')
+axes[3, 2].set_title('Z-score Scaled Price vs Area')
+
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+plt.show()
+
+# Display summary head of the processed DataFrame
+display(housing_processed[['Price', 'Price_MinMax', 'Price_Zscore', 'Area_SqFt', 'Area_SqFt_MinMax', 'Area_SqFt_Zscore', 'Neighborhood', 'Condition']].head())
